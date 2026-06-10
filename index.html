@@ -154,8 +154,8 @@ button:active {
     <div id="bottom-bar">
       <div id="captured"></div>
       <div id="controls">
-        <button id="btn-undo">⟲ Undo</button>
         <button id="btn-new">✚ New Game</button>
+        <button id="btn-undo">⟲ Undo</button>
       </div>
     </div>
     <div id="move-log"></div>
@@ -543,15 +543,15 @@ class Renderer {
     this.BOARD_SIZE = this.SQ_SIZE * 8;
     this.canvas.width = this.BOARD_SIZE + this.BORDER * 2;
     this.canvas.height = this.BOARD_SIZE + this.BORDER * 2;
-    this.dpr = 1;
     this.woodTexture = null;
     this.lightWood = '#e8c37b';
     this.darkWood = '#7a4a2a';
-    this.lightWoodDark = '#d4a96a';
-    this.darkWoodDark = '#5c3218';
     this.ready = false;
+    this.flipped = true;
     this.loadTexture();
   }
+
+  vr(r) { return this.flipped ? 7 - r : r; }
 
   loadTexture() {
     const img = new Image();
@@ -564,13 +564,13 @@ class Renderer {
     const bx = x - this.BORDER;
     const by = y - this.BORDER;
     if (bx < 0 || by < 0 || bx >= this.BOARD_SIZE || by >= this.BOARD_SIZE) return null;
-    return [(by / this.SQ_SIZE) | 0, (bx / this.SQ_SIZE) | 0];
+    return [this.vr((by / this.SQ_SIZE) | 0), (bx / this.SQ_SIZE) | 0];
   }
 
   getSquareCenter(row, col) {
     return {
       x: this.BORDER + col * this.SQ_SIZE + this.SQ_SIZE / 2,
-      y: this.BORDER + row * this.SQ_SIZE + this.SQ_SIZE / 2
+      y: this.BORDER + this.vr(row) * this.SQ_SIZE + this.SQ_SIZE / 2
     };
   }
 
@@ -629,8 +629,9 @@ class Renderer {
   drawSquares(ctx, game, selected, legalMoves) {
     for (let r = 0; r < 8; r++)
       for (let c = 0; c < 8; c++) {
+        const vr = this.vr(r);
         const x = this.BORDER + c * this.SQ_SIZE;
-        const y = this.BORDER + r * this.SQ_SIZE;
+        const y = this.BORDER + vr * this.SQ_SIZE;
         const isLight = (r + c) % 2 === 0;
         const isSelected = selected && selected[0] === r && selected[1] === c;
 
@@ -659,8 +660,9 @@ class Renderer {
   drawLastMoveHighlight(ctx, lastMove) {
     const { from, to } = lastMove;
     for (const [r, c] of [from, to]) {
+      const vr = this.vr(r);
       const x = this.BORDER + c * this.SQ_SIZE;
-      const y = this.BORDER + r * this.SQ_SIZE;
+      const y = this.BORDER + vr * this.SQ_SIZE;
       ctx.fillStyle = 'rgba(200,160,60,0.25)';
       ctx.fillRect(x, y, this.SQ_SIZE, this.SQ_SIZE);
     }
@@ -672,18 +674,20 @@ class Renderer {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (let i = 0; i < 8; i++) {
+      const vr = i;
       const r = this.BORDER + i * this.SQ_SIZE + this.SQ_SIZE / 2;
       const c = this.BORDER + i * this.SQ_SIZE + this.SQ_SIZE / 2;
       ctx.fillStyle = 'rgba(180,140,100,0.5)';
       ctx.fillText(files[i], c, this.BORDER + this.BOARD_SIZE + 9);
-      ctx.fillText('' + (8 - i), this.BORDER - 9, r);
+      ctx.fillText('' + (this.flipped ? i + 1 : 8 - i), this.BORDER - 9, r);
     }
   }
 
   drawLegalMoveIndicators(ctx, moves, game) {
     for (const [r, c] of moves) {
+      const vr = this.vr(r);
       const cx = this.BORDER + c * this.SQ_SIZE + this.SQ_SIZE / 2;
-      const cy = this.BORDER + r * this.SQ_SIZE + this.SQ_SIZE / 2;
+      const cy = this.BORDER + vr * this.SQ_SIZE + this.SQ_SIZE / 2;
       const piece = game.board[r][c];
       if (piece) {
         ctx.strokeStyle = 'rgba(200,60,40,0.5)';
@@ -714,8 +718,9 @@ class Renderer {
   }
 
   drawPiece(ctx, piece, r, c) {
+    const vr = this.vr(r);
     const cx = this.BORDER + c * this.SQ_SIZE + this.SQ_SIZE / 2;
-    const cy = this.BORDER + r * this.SQ_SIZE + this.SQ_SIZE / 2;
+    const cy = this.BORDER + vr * this.SQ_SIZE + this.SQ_SIZE / 2;
     const size = this.SQ_SIZE * 0.78;
     const sym = PIECE_SYMBOLS[piece.color + piece.type];
     if (!sym) return;
@@ -799,19 +804,19 @@ class Renderer {
 class SoundManager {
   constructor() {
     this.ctx = null;
-    this.initialized = false;
   }
 
   init() {
-    if (this.initialized) return;
+    if (this.ctx) {
+      if (this.ctx.state === 'suspended') this.ctx.resume();
+      return;
+    }
     try {
       this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-      this.initialized = true;
     } catch (e) { }
   }
 
   playMove(isCapture) {
-    this.init();
     if (!this.ctx) return;
     if (this.ctx.state === 'suspended') this.ctx.resume();
 
@@ -963,11 +968,20 @@ function handleCanvasInput(clientX, clientY) {
   render();
 }
 
+function initSoundOnInteraction() {
+  sound.init();
+  document.removeEventListener('click', initSoundOnInteraction);
+  document.removeEventListener('touchstart', initSoundOnInteraction);
+}
+document.addEventListener('click', initSoundOnInteraction);
+document.addEventListener('touchstart', initSoundOnInteraction);
+
 canvas.addEventListener('click', (e) => handleCanvasInput(e.clientX, e.clientY));
-canvas.addEventListener('touchend', (e) => {
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
   const touch = e.changedTouches[0];
   if (touch) handleCanvasInput(touch.clientX, touch.clientY);
-});
+}, { passive: false });
 
 document.getElementById('btn-new').addEventListener('click', () => {
   engine.reset();
